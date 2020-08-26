@@ -7,7 +7,7 @@ from .forms import PostForm, CommentForm
 
 
 def index(request):
-    post_list = Post.objects.all()
+    post_list = Post.objects.select_related("author", "group").all()
 
     paginator = Paginator(post_list, 10)
     page_number = request.GET.get("page")
@@ -73,7 +73,7 @@ def post_edit(request, username, post_id):
 
 @login_required
 def add_comment(request, username, post_id):
-    post = get_object_or_404(Post, id=post_id)
+    post = get_object_or_404(Post, author__username=username, id=post_id)
     form = CommentForm(request.POST or None)
     if request.method == "POST":
         if form.is_valid():
@@ -87,8 +87,7 @@ def add_comment(request, username, post_id):
 
 @login_required
 def follow_index(request):
-    authors = request.user.follower.all().values_list("author")
-    post_list = Post.objects.filter(author__in=authors)
+    post_list = Post.objects.filter(author__following__user=request.user)
 
     paginator = Paginator(post_list, 10)
     page_number = request.GET.get("page")
@@ -108,10 +107,7 @@ def profile_follow(request, username):
 
 @login_required
 def profile_unfollow(request, username):
-    author = get_object_or_404(User, username=username)
-    user = request.user
-    link = get_object_or_404(Follow, user=user, author=author)
-    link.delete()
+    get_object_or_404(Follow, user=request.user, author__username=username).delete()
     return redirect("profile", username)
 
 

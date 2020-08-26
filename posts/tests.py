@@ -1,4 +1,5 @@
 from django.core.cache import cache
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, Client
 from django.urls import reverse
 from .models import User, Post, Group
@@ -49,8 +50,9 @@ class TestPostsApp(TestCase):
                 "post": (self.user, post.id),
                 "group_posts": (self.group.slug,)}
         for page in pages:
-            response = self.logged_client.get(reverse(page, args=args[page]))
-            self.assertContains(response, content)
+            with self.subTest(f"page: {page}"):
+                response = self.logged_client.get(reverse(page, args=args[page]))
+                self.assertContains(response, content)
 
         return True
 
@@ -60,12 +62,20 @@ class TestPostsApp(TestCase):
         self.assertEqual(response.status_code, 404)
 
     def test_pages_have_img(self):
-        with open("media/posts/yt.png", 'rb') as img:
-            self.logged_client.post(reverse("new_post"),
-                                    {"text": "post with image",
-                                     "image": img,
-                                     "group": self.group.pk})
+        small_gif = (b'\x47\x49\x46\x38\x39\x61\x01\x00\x01\x00\x00\x00\x00\x21\xf9\x04'
+                     b'\x01\x0a\x00\x01\x00\x2c\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02'
+                     b'\x02\x4c\x01\x00\x3b')
+        img = SimpleUploadedFile(
+            name="some.gif",
+            content=small_gif,
+            content_type="image/gif"
+        )
+        response = self.logged_client.post(reverse("new_post"),
+                                {"text": "post with image",
+                                 "image": img,
+                                 "group": self.group.pk})
         cache.clear()
+        print(response.content.decode("utf-8"))
 
         post = Post.objects.get(text__contains="post with image")
         img_tag = "<img class=\"card-img\""
@@ -73,17 +83,21 @@ class TestPostsApp(TestCase):
         self.assertTrue(self.check_post_content(post, img_tag))
 
     def test_wrong_img_format(self):
-        with open("requirements.txt") as img:
-            response = self.logged_client.post(
+        image = SimpleUploadedFile(
+            name="image.txt",
+            content=b"nonsense",
+            content_type="text/plain"
+        )
+        response = self.logged_client.post(
                 reverse("new_post"),
                 {
                     "text": "post with non graphical file",
-                    "image": img
+                    "image": image
                 }
             )
         msg = "Загрузите правильное изображение. Файл, который вы загрузили, поврежден или не является изображением."
 
-        self.assertContains(response, msg)
+        self.assertFormError(response, "form", "image", msg)
 
     def test_cached_index_page(self):
         post_1 = Post.objects.create(author=self.user, text="post_1")
@@ -100,24 +114,28 @@ class TestPostsApp(TestCase):
         self.assertContains(response, post_1.text)
         self.assertContains(response, post_2.text)
 
-    def test_follow_unfollow(self):
+    def test_follow(self):
         followers_count_before = self.user2.following.count()
         self.logged_client.get(reverse("profile_follow", args=(self.user2,)))
         followers_count_after = self.user2.following.count()
 
         self.assertEqual(followers_count_after, followers_count_before + 1)
 
+    def test_unfollow(self):
+        self.logged_client.get(reverse("profile_follow", args=(self.user2,)))
         followers_count_before = self.user2.following.count()
         self.logged_client.get(reverse("profile_unfollow", args=(self.user2,)))
         followers_count_after = self.user2.following.count()
 
         self.assertEqual(followers_count_after + 1, followers_count_before)
 
-    def test_new_post_in_feed(self):
-        post = Post.objects.create(author=self.user2, text="text for followers")
+    def test_new_post_not_in_feed(self):
+        post = Post.objects.create(author=self.user2, text="first text for followers")
         response = self.logged_client.get(reverse("follow_index"))
         self.assertNotContains(response, post.text)
 
+    def test_new_post_in_feed(self):
+        post = Post.objects.create(author=self.user2, text="second text for followers")
         self.logged_client.get(reverse("profile_follow", args=(self.user2,)))
         response = self.logged_client.get(reverse("follow_index"))
         self.assertContains(response, post.text)
