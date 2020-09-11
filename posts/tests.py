@@ -75,7 +75,6 @@ class TestPostsApp(TestCase):
                                  "image": img,
                                  "group": self.group.pk})
         cache.clear()
-        print(response.content.decode("utf-8"))
 
         post = Post.objects.get(text__contains="post with image")
         img_tag = "<img class=\"card-img\""
